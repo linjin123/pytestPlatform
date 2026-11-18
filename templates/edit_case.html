@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ "编辑用例" if case else "新建用例" }}</h2>
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<form method="post"
+      action="{{ '/cases/' ~ case.id if case else '/cases' }}">
+  {% if case %}<input type="hidden" name="version" value="{{ case.version }}">{% endif %}
+  <p>名称：<input name="name" value="{{ case.name if case else '' }}" required></p>
+  <p>操作人：<input name="user" placeholder="你的名字"></p>
+  <p>用例内容（JSON）：</p>
+  <textarea name="content">{{ case.content if case else '{"steps": [{"name": "访问首页", "method": "GET", "url": "https://httpbin.org/get", "expect_status": 200}]}' }}</textarea>
+  <p><button class="btn" type="submit">保存</button></p>
+</form>
+{% endblock %}

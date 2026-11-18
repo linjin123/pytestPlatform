@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>用例列表</h2>
+<form method="post" action="/runs">
+  <table>
+    <tr><th></th><th>ID</th><th>名称</th><th>版本</th><th>最后修改</th><th></th></tr>
+    {% for c in cases %}
+    <tr>
+      <td><input type="checkbox" name="case_ids" value="{{ c.id }}"></td>
+      <td>{{ c.id }}</td>
+      <td>{{ c.name }}</td>
+      <td>{{ c.version }}</td>
+      <td>{{ c.updated_at }} by {{ c.updated_by }}</td>
+      <td><a href="/cases/{{ c.id }}/edit">编辑</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p>
+    操作人：<input name="user" placeholder="你的名字">
+    <button class="btn" type="submit">执行选中用例</button>
+    <a class="btn" href="/cases/new">新建用例</a>
+  </p>
+</form>
+
+<h3>导入用例（JSON）</h3>
+<form method="post" action="/cases/import" enctype="multipart/form-data">
+  <input type="file" name="file" accept=".json">
+  <button class="btn">导入</button>
+</form>
+
+<h3>最近执行</h3>
+<table>
+  <tr><th>ID</th><th>状态</th><th>通过/总数</th><th>触发人</th><th></th></tr>
+  {% for r in runs %}
+  <tr>
+    <td>{{ r.id }}</td><td>{{ r.status }}</td>
+    <td>{{ r.passed }}/{{ r.total }}</td><td>{{ r.triggered_by }}</td>
+    <td><a href="/runs/{{ r.id }}">查看</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

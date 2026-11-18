@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>执行 #{{ run.id }} — {{ run.status }}</h2>
+<p>通过 {{ run.passed }} / 总数 {{ run.total }}，失败 {{ run.failed }}</p>
+
+<h3>实时日志</h3>
+<pre id="log" style="background:#111;color:#0f0;padding:12px;height:260px;overflow:auto;"></pre>
+
+<h3>Allure 报告</h3>
+<div id="report-box" style="display:none;">
+  <iframe src="/reports/{{ run.id }}/index.html" style="width:100%;height:800px;border:1px solid #ccc;"></iframe>
+</div>
+
+<script>
+const runId = {{ run.id }};
+const logEl = document.getElementById('log');
+const reportBox = document.getElementById('report-box');
+
+function append(text) {
+  logEl.textContent += text + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+const es = new EventSource(`/runs/${runId}/stream`);
+es.onmessage = e => append(JSON.parse(e.data));
+es.addEventListener('done', () => {
+  es.close();
+  append("=== 执行结束 ===");
+  setTimeout(() => location.reload(), 800);
+});
+</script>
+{% endblock %}
