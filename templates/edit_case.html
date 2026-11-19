@@ -4,13 +4,169 @@
 
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 
-<form method="post"
-      action="{{ '/cases/' ~ case.id if case else '/cases' }}">
-  {% if case %}<input type="hidden" name="version" value="{{ case.version }}">{% endif %}
-  <p>名称：<input name="name" value="{{ case.name if case else '' }}" required></p>
+<!-- 模式切换 -->
+<div>
+  <label><input type="radio" name="mode" value="visual" checked onclick="switchMode('visual')"> 在线可视化编排</label>
+  <label><input type="radio" name="mode" value="script" onclick="switchMode('script')"> 直接导入/编写代码</label>
+</div>
+
+<form method="post" action="{{ '/cases/' ~ case.id if case else '/cases' }}" id="caseForm">
+  {% if case %}
+  <input type="hidden" name="version" value="{{ case.version }}">
+  <input type="hidden" name="case_type" id="caseType" value="{{ case.case_type }}">
+  {% else %}
+  <input type="hidden" name="case_type" id="caseType" value="visual">
+  {% endif %}
+
+  <p>用例名称：<input name="name" value="{{ case.name if case else '' }}" required></p>
   <p>操作人：<input name="user" placeholder="你的名字"></p>
-  <p>用例内容（JSON）：</p>
-  <textarea name="content">{{ case.content if case else '{"steps": [{"name": "访问首页", "method": "GET", "url": "https://httpbin.org/get", "expect_status": 200}]}' }}</textarea>
-  <p><button class="btn" type="submit">保存</button></p>
+
+  <!-- 可视化模式区域 -->
+  <div id="visualArea">
+    <h3>用例步骤</h3>
+    <div id="stepsContainer"></div>
+    <button type="button" class="btn" onclick="addStep()">+ 添加步骤</button>
+    <button type="button" class="btn" onclick="saveVisual()">保存编排</button>
+  </div>
+
+  <!-- 代码模式区域 -->
+  <div id="scriptArea" style="display:none;">
+    <h3>Python 代码 (可直接粘贴或导入)</h3>
+    <input type="file" id="fileInput" accept=".py" onchange="importFile(this)">
+    <textarea name="content_script" id="scriptContent" style="height: 400px; width:100%; font-family: monospace;"></textarea>
+    <button type="button" class="btn" onclick="saveScript()">保存代码</button>
+  </div>
+
+  <!-- 最终提交给后端的隐藏字段 -->
+  <input type="hidden" name="content" id="finalContent">
 </form>
+
+<script>
+// 定义支持的方法字典：key是方法名，value是输入参数配置
+const ACTION_DICT = {
+  "navigate": { args: ["url"] },
+  "click_by_icon": { kwargs: ["iconName", "templatePath", "mark", "isPopupAction"] },
+  "click_by_text": { kwargs: ["text", "mark", "isPopupAction", "force_refresh"] },
+  "click_by_text_for_scroll": { args: ["text"] },
+  "page.keyboard.type": { args: ["text"] }
+};
+
+let stepsData = []; // 存放当前编辑的步骤数据
+
+// 初始化加载已有数据
+function init() {
+    let type = document.getElementById('caseType').value;
+    let content = `{{ case.content | safe if case else '{}' }}`;
+
+    if (type === 'script') {
+        switchMode('script');
+        document.getElementById('scriptContent').value = content;
+    } else {
+        switchMode('visual');
+        try {
+            let data = JSON.parse(content);
+            stepsData = data.steps || [];
+            renderSteps();
+        } catch(e) {}
+    }
+}
+
+function switchMode(mode) {
+    document.getElementById('caseType').value = mode;
+    document.getElementById('visualArea').style.display = mode === 'visual' ? 'block' : 'none';
+    document.getElementById('scriptArea').style.display = mode === 'script' ? 'block' : 'none';
+}
+
+// 渲染可视化 UI
+function renderSteps() {
+    const container = document.getElementById('stepsContainer');
+    container.innerHTML = '';
+    stepsData.forEach((step, index) => {
+        let div = document.createElement('div');
+        div.style.border = "1px solid #ccc";
+        div.style.padding = "10px";
+        div.style.marginBottom = "10px";
+
+        let html = `<b>步骤 ${index + 1}:</b>
+        <select onchange="changeAction(${index}, this.value)">
+            ${Object.keys(ACTION_DICT).map(a => `<option value="${a}" ${step.action === a ? 'selected' : ''}>${a}</option>`).join('')}
+        </select>
+        <button onclick="removeStep(${index})" style="float:right;color:red;">删除</button><br><br>`;
+
+        // 根据选择的方法，渲染不同的输入框
+        const config = ACTION_DICT[step.action] || {};
+
+        // 渲染 args
+        (config.args || []).forEach((argName, i) => {
+            let val = (step.args && step.args[i]) ? step.args[i] : "";
+            html += `<label>${argName}: <input type="text" onchange="updateArg(${index}, ${i}, this.value)" value="${val}"></label><br>`;
+        });
+
+        // 渲染 kwargs
+        (config.kwargs || []).forEach((kwName) => {
+            let val = (step.kwargs && step.kwargs[kwName] !== undefined) ? step.kwargs[kwName] : "";
+            html += `<label>${kwName}: <input type="text" onchange="updateKwarg(${index}, '${kwName}', this.value)" value="${val}"></label><br>`;
+        });
+
+        div.innerHTML = html;
+        container.appendChild(div);
+    });
+}
+
+function addStep() {
+    stepsData.push({ target: "browser", action: "navigate", args: [], kwargs: {} });
+    renderSteps();
+}
+
+function removeStep(index) {
+    stepsData.splice(index, 1);
+    renderSteps();
+}
+
+function changeAction(index, newAction) {
+    stepsData[index] = { target: newAction.includes("page.") ? "browser.page" : "browser", action: newAction.replace("page.", ""), args: [], kwargs: {} };
+    if(newAction === "page.keyboard.type") stepsData[index] = { target: "browser.page.keyboard", action: "type", args: [], kwargs: {} };
+    renderSteps();
+}
+
+function updateArg(stepIdx, argIdx, val) {
+    if(!stepsData[stepIdx].args) stepsData[stepIdx].args = [];
+    stepsData[stepIdx].args[argIdx] = val;
+}
+
+function updateKwarg(stepIdx, kwName, val) {
+    if(!stepsData[stepIdx].kwargs) stepsData[stepIdx].kwargs = {};
+    // 简单类型转换
+    if(val === "true") val = true;
+    if(val === "false") val = false;
+    stepsData[stepIdx].kwargs[kwName] = val;
+}
+
+// 保存可视化数据
+function saveVisual() {
+    let data = { "steps": stepsData, "parametrize": "[{\"url\": \"https://10.235.2.96:31080/\"}]" };
+    document.getElementById('finalContent').value = JSON.stringify(data, null, 2);
+    document.getElementById('caseForm').submit();
+}
+
+// 处理文件导入
+function importFile(input) {
+    if (input.files && input.files[0]) {
+        let reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('scriptContent').value = e.target.result;
+        };
+        reader.readAsText(input.files[0]);
+    }
+}
+
+// 保存代码数据
+function saveScript() {
+    document.getElementById('finalContent').value = document.getElementById('scriptContent').value;
+    document.getElementById('caseForm').submit();
+}
+
+// 页面加载时执行初始化
+window.onload = init;
+</script>
 {% endblock %}

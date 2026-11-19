@@ -1,0 +1,3 @@
+第一步：Web 端“派单” APP接口
+第二步：后台 Worker 抢单（worker.py）
+第三步：真正触发 Pytest（executor.py）

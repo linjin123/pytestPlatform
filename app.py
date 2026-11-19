@@ -14,7 +14,7 @@ from executor import RUNS_DIR
 from worker import Worker
 
 app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///testhub.db"
+app.config["SQLALCHEMY_DATABASE_URI"] = "mysql+pymysql://root:Password123%40mysql@172.17.2.79:3306/testhub?charset=utf8mb4"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 
