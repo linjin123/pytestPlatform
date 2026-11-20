@@ -9,7 +9,7 @@ from flask import (
 )
 from sqlalchemy.orm.exc import StaleDataError
 
-from models import db, TestCase, TestRun, TestResult
+from models import db, TestCase, TestRun, TestResult, ActionMethod
 from executor import RUNS_DIR
 from worker import Worker
 
@@ -39,6 +39,7 @@ def create_case():
         name=request.form["name"],
         content=request.form.get("content", '{"steps": []}'),
         updated_by=request.form.get("user", "anonymous"),
+        case_type=request.form.get("case_type", "visual"),
     )
     db.session.add(case)
     db.session.commit()
@@ -68,6 +69,7 @@ def update_case(case_id):
     case.name = request.form["name"]
     case.content = request.form.get("content", "{}")
     case.updated_by = request.form.get("user", "anonymous")
+    case.case_type = request.form.get("case_type", "visual")
 
     try:
         db.session.commit()
@@ -175,6 +177,73 @@ def run_status(run_id):
     run = db.session.get(TestRun, run_id) or abort(404)
     return jsonify({"status": run.status, "total": run.total,
                     "passed": run.passed, "failed": run.failed})
+
+
+@app.route("/methods", methods=["GET", "POST"])
+def methods():
+    if request.method == "POST":
+        name = request.form["name"]
+        m = ActionMethod.query.filter_by(name=name).first()
+        if not m:
+            m = ActionMethod(name=name)
+            db.session.add(m)
+        m.target = request.form["target"]
+        m.args_json = request.form["args_json"]
+        m.kwargs_json = request.form["kwargs_json"]
+        db.session.commit()
+        return redirect(url_for("methods"))
+    return render_template("methods.html", methods=ActionMethod.query.all())
+
+
+@app.route("/methods/delete/<int:id>")
+def delete_method(id):
+    m = db.session.get(ActionMethod, id)
+    if m:
+        db.session.delete(m)
+        db.session.commit()
+    return redirect(url_for("methods"))
+
+
+# 供前端拉取字典
+@app.route("/api/methods")
+def api_methods():
+    methods = ActionMethod.query.all()
+    return jsonify([{"id": m.id, "name": m.name, "target": m.target,
+                     "args_json": m.args_json, "kwargs_json": m.kwargs_json} for m in methods])
+
+
+# 渲染多用例编排页面（新建或者编辑）
+@app.route("/cases/batch_edit")
+def batch_edit():
+    # 这里可以把已有的用例传给前端，实现“编辑回显”
+    cases = TestCase.query.all()
+    cases_data = [{"id": c.id, "name": c.name, "case_type": c.case_type,
+                   "parametrize": json.loads(c.content).get("parametrize", "[]"),
+                   "steps": json.loads(c.content).get("steps", [])} for c in cases]
+    return render_template("edit_case.html", cases_json=json.dumps(cases_data))
+
+
+# 批量保存接口
+@app.route("/api/batch_save_cases", methods=["POST"])
+def batch_save_cases():
+    data = request.json
+    cases = data.get("cases", [])
+    user = data.get("user", "anonymous")
+
+    for c in cases:
+        if c.get("id"):
+            # 更新
+            tc = db.session.get(TestCase, c["id"])
+            if tc:
+                tc.name = c["name"]
+                tc.content = c["content"]
+                tc.updated_by = user
+        else:
+            # 新建
+            tc = TestCase(name=c["name"], content=c["content"], updated_by=user)
+            db.session.add(tc)
+    db.session.commit()
+    return jsonify({"status": "ok"})
 
 
 if __name__ == "__main__":

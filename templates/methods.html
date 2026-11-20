@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>自定义动作管理 (Action Methods)</h2>
+
+<form method="post" action="/methods">
+  <p>方法名：<input name="name" placeholder="如: click_by_text" required></p>
+  <p>所属对象：<input name="target" value="browser" required></p>
+  <p>位置参数 (JSON数组)：<input name="args_json" value='[]' style="width: 300px;"></p>
+  <p>关键字参数 (JSON数组)：<input name="kwargs_json" value='["text", "mark"]' style="width: 300px;"></p>
+  <button class="btn" type="submit">添加/覆盖方法</button>
+</form>
+
+<hr>
+<table>
+  <tr><th>方法名</th><th>对象</th><th>Args</th><th>Kwargs</th><th>操作</th></tr>
+  {% for m in methods %}
+  <tr>
+    <td>{{ m.name }}</td><td>{{ m.target }}</td>
+    <td>{{ m.args_json }}</td><td>{{ m.kwargs_json }}</td>
+    <td><a href="/methods/delete/{{ m.id }}" style="color:red;">删除</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -1,172 +1,248 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>{{ "编辑用例" if case else "新建用例" }}</h2>
+<style>
+  .case-block { border: 1px solid #ccc; margin-bottom: 15px; border-radius: 5px; }
+  .case-header { background: #f5f5f5; padding: 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+  .case-body { padding: 15px; display: none; }
+  .step-row { border: 1px dashed #ddd; padding: 10px; margin-bottom: 10px; background: #fafafa; }
+  .form-group { display: inline-block; margin-right: 15px; margin-bottom: 5px; }
+</style>
 
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
-
-<!-- 模式切换 -->
-<div>
-  <label><input type="radio" name="mode" value="visual" checked onclick="switchMode('visual')"> 在线可视化编排</label>
-  <label><input type="radio" name="mode" value="script" onclick="switchMode('script')"> 直接导入/编写代码</label>
+<div style="display: flex; justify-content: space-between;">
+  <h2>批量编排测试用例</h2>
+  <div>
+    <button type="button" class="btn" onclick="addNewCaseBlock()">+ 添加新用例</button>
+    <button type="button" class="btn" onclick="saveAllCases()" style="background:#28a745; color:white;">保存所有用例</button>
+  </div>
 </div>
 
-<form method="post" action="{{ '/cases/' ~ case.id if case else '/cases' }}" id="caseForm">
-  {% if case %}
-  <input type="hidden" name="version" value="{{ case.version }}">
-  <input type="hidden" name="case_type" id="caseType" value="{{ case.case_type }}">
-  {% else %}
-  <input type="hidden" name="case_type" id="caseType" value="visual">
-  {% endif %}
-
-  <p>用例名称：<input name="name" value="{{ case.name if case else '' }}" required></p>
-  <p>操作人：<input name="user" placeholder="你的名字"></p>
-
-  <!-- 可视化模式区域 -->
-  <div id="visualArea">
-    <h3>用例步骤</h3>
-    <div id="stepsContainer"></div>
-    <button type="button" class="btn" onclick="addStep()">+ 添加步骤</button>
-    <button type="button" class="btn" onclick="saveVisual()">保存编排</button>
-  </div>
-
-  <!-- 代码模式区域 -->
-  <div id="scriptArea" style="display:none;">
-    <h3>Python 代码 (可直接粘贴或导入)</h3>
-    <input type="file" id="fileInput" accept=".py" onchange="importFile(this)">
-    <textarea name="content_script" id="scriptContent" style="height: 400px; width:100%; font-family: monospace;"></textarea>
-    <button type="button" class="btn" onclick="saveScript()">保存代码</button>
-  </div>
-
-  <!-- 最终提交给后端的隐藏字段 -->
-  <input type="hidden" name="content" id="finalContent">
-</form>
+<div id="casesContainer">
+  <!-- 已有的用例会通过 JS 渲染到这里 -->
+</div>
 
 <script>
-// 定义支持的方法字典：key是方法名，value是输入参数配置
-const ACTION_DICT = {
-  "navigate": { args: ["url"] },
-  "click_by_icon": { kwargs: ["iconName", "templatePath", "mark", "isPopupAction"] },
-  "click_by_text": { kwargs: ["text", "mark", "isPopupAction", "force_refresh"] },
-  "click_by_text_for_scroll": { args: ["text"] },
-  "page.keyboard.type": { args: ["text"] }
-};
+let actionMethods = []; // 从后端拉取的方法字典
+let allCasesData = [];  // 页面上的所有用例数据
 
-let stepsData = []; // 存放当前编辑的步骤数据
+// 1. 初始化：拉取字典 + 解析已有用例
+async function init() {
+    const res = await fetch('/api/methods');
+    actionMethods = await res.json();
 
-// 初始化加载已有数据
-function init() {
-    let type = document.getElementById('caseType').value;
-    let content = `{{ case.content | safe if case else '{}' }}`;
+    // 解析从后端传来的已有用例 (如果是在编辑模式)
+    const existingCases = {{ cases_json | safe if cases_json else '[]' }};
 
-    if (type === 'script') {
-        switchMode('script');
-        document.getElementById('scriptContent').value = content;
+    if (existingCases.length > 0) {
+        allCasesData = existingCases;
+        allCasesData.forEach(c => {
+            if (c.steps) {
+                c.steps.forEach(step => {
+                    if (step.action) {
+                        // 去字典里找名字等于当前 action 的方法
+                        const m = actionMethods.find(x => x.name === step.action);
+                        if (m) {
+                            step._methodId = m.id;
+                        }
+                    }
+                });
+            }
+        });
     } else {
-        switchMode('visual');
-        try {
-            let data = JSON.parse(content);
-            stepsData = data.steps || [];
-            renderSteps();
-        } catch(e) {}
+        addNewCaseBlock(); // 如果没有，默认给一个空块
     }
+    renderAll();
 }
 
-function switchMode(mode) {
-    document.getElementById('caseType').value = mode;
-    document.getElementById('visualArea').style.display = mode === 'visual' ? 'block' : 'none';
-    document.getElementById('scriptArea').style.display = mode === 'script' ? 'block' : 'none';
+// 2. 添加一个新的用例折叠面板
+function addNewCaseBlock() {
+    allCasesData.push({
+        id: null, // 新建时没有 ID
+        name: "新建用例_" + (allCasesData.length + 1),
+        case_type: "visual",
+        parametrize: "[{\"url\": \"https://httpbin.org/get\"}]",
+        steps: []
+    });
+    renderAll();
+    // 展开最新添加的
+    setTimeout(() => {
+        const headers = document.querySelectorAll('.case-header');
+        if(headers.length > 0) headers[headers.length - 1].click();
+    }, 100);
 }
 
-// 渲染可视化 UI
-function renderSteps() {
-    const container = document.getElementById('stepsContainer');
+// 3. 渲染整个页面
+function renderAll() {
+    const container = document.getElementById('casesContainer');
     container.innerHTML = '';
-    stepsData.forEach((step, index) => {
-        let div = document.createElement('div');
-        div.style.border = "1px solid #ccc";
-        div.style.padding = "10px";
-        div.style.marginBottom = "10px";
 
-        let html = `<b>步骤 ${index + 1}:</b>
-        <select onchange="changeAction(${index}, this.value)">
-            ${Object.keys(ACTION_DICT).map(a => `<option value="${a}" ${step.action === a ? 'selected' : ''}>${a}</option>`).join('')}
-        </select>
-        <button onclick="removeStep(${index})" style="float:right;color:red;">删除</button><br><br>`;
+    allCasesData.forEach((caseData, caseIdx) => {
+        const block = document.createElement('div');
+        block.className = 'case-block';
 
-        // 根据选择的方法，渲染不同的输入框
-        const config = ACTION_DICT[step.action] || {};
+        // 头部 (点击折叠/展开)
+        const header = document.createElement('div');
+        header.className = 'case-header';
+        header.innerHTML = `<b id="title-${caseIdx}">${caseData.name}</b>
+                            <span style="color:#888; font-size:12px;">点击展开/收起</span>`;
+        header.onclick = () => {
+            const body = document.getElementById(`body-${caseIdx}`);
+            body.style.display = body.style.display === 'none' ? 'block' : 'none';
+        };
 
-        // 渲染 args
-        (config.args || []).forEach((argName, i) => {
-            let val = (step.args && step.args[i]) ? step.args[i] : "";
-            html += `<label>${argName}: <input type="text" onchange="updateArg(${index}, ${i}, this.value)" value="${val}"></label><br>`;
-        });
+        // 主体内容
+        const body = document.createElement('div');
+        body.className = 'case-body';
+        body.id = `body-${caseIdx}`;
+        if (caseIdx === allCasesData.length - 1) body.style.display = 'block'; // 默认展开最后一个
 
-        // 渲染 kwargs
-        (config.kwargs || []).forEach((kwName) => {
-            let val = (step.kwargs && step.kwargs[kwName] !== undefined) ? step.kwargs[kwName] : "";
-            html += `<label>${kwName}: <input type="text" onchange="updateKwarg(${index}, '${kwName}', this.value)" value="${val}"></label><br>`;
-        });
+        // 基础信息
+        body.innerHTML = `
+            <div class="form-group">
+                <label>用例名称：<input type="text" value="${caseData.name}" onchange="updateCaseInfo(${caseIdx}, 'name', this.value)"></label>
+            </div>
+            <div class="form-group">
+                <label>参数化数据(JSON)：<input type="text" value='${caseData.parametrize || "[]"}' onchange="updateCaseInfo(${caseIdx}, 'parametrize', this.value)" style="width:300px;"></label>
+            </div>
+            <div style="margin-bottom:10px;">
+                <button onclick="deleteCase(${caseIdx})" style="color:red;">删除此用例</button>
+                <button onclick="addStep(${caseIdx})">+ 添加步骤</button>
+            </div>
+            <div id="steps-${caseIdx}"></div>
+        `;
 
-        div.innerHTML = html;
-        container.appendChild(div);
+        container.appendChild(block);
+        block.appendChild(header);
+        block.appendChild(body);
+
+        renderSteps(caseIdx);
     });
 }
 
-function addStep() {
-    stepsData.push({ target: "browser", action: "navigate", args: [], kwargs: {} });
-    renderSteps();
+// 4. 渲染某个用例下的步骤
+function renderSteps(caseIdx) {
+    const caseData = allCasesData[caseIdx];
+    const container = document.getElementById(`steps-${caseIdx}`);
+    container.innerHTML = '';
+
+    caseData.steps.forEach((step, stepIdx) => {
+        const row = document.createElement('div');
+        row.className = 'step-row';
+
+        let html = `<b>步骤 ${stepIdx + 1}:</b>
+        <select onchange="changeAction(${caseIdx}, ${stepIdx}, this.value)">
+            <option value="">-- 选择方法 --</option>
+            ${actionMethods.map(m => `<option value="${m.id}" ${step._methodId === m.id ? 'selected' : ''}>${m.name}</option>`).join('')}
+        </select>
+        <button onclick="removeStep(${caseIdx}, ${stepIdx})" style="float:right;color:red;">删除</button>
+        <div style="margin-top:10px;">`;
+
+        // 如果选中了方法，渲染对应的入参
+        if (step._methodId) {
+            const methodDef = actionMethods.find(m => m.id === step._methodId);
+            if (methodDef) {
+                // 渲染 args
+                const args = JSON.parse(methodDef.args_json || "[]");
+                args.forEach((argName, i) => {
+                    const val = (step.args && step.args[i]) ? step.args[i] : "";
+                    html += `<span class="form-group"><label>${argName}: <input type="text" value="${val}" onchange="updateArg(${caseIdx}, ${stepIdx}, ${i}, this.value)"></label></span>`;
+                });
+
+                // 渲染 kwargs
+                const kwargs = JSON.parse(methodDef.kwargs_json || "[]");
+                kwargs.forEach((kwName) => {
+                    const val = (step.kwargs && step.kwargs[kwName] !== undefined) ? step.kwargs[kwName] : "";
+                    html += `<span class="form-group"><label>${kwName}: <input type="text" value="${val}" onchange="updateKwarg(${caseIdx}, ${stepIdx}, '${kwName}', this.value)"></label></span>`;
+                });
+            }
+        }
+
+        html += `</div>`;
+        row.innerHTML = html;
+        container.appendChild(row);
+    });
 }
 
-function removeStep(index) {
-    stepsData.splice(index, 1);
-    renderSteps();
-}
+// --- 交互更新逻辑 ---
 
-function changeAction(index, newAction) {
-    stepsData[index] = { target: newAction.includes("page.") ? "browser.page" : "browser", action: newAction.replace("page.", ""), args: [], kwargs: {} };
-    if(newAction === "page.keyboard.type") stepsData[index] = { target: "browser.page.keyboard", action: "type", args: [], kwargs: {} };
-    renderSteps();
-}
-
-function updateArg(stepIdx, argIdx, val) {
-    if(!stepsData[stepIdx].args) stepsData[stepIdx].args = [];
-    stepsData[stepIdx].args[argIdx] = val;
-}
-
-function updateKwarg(stepIdx, kwName, val) {
-    if(!stepsData[stepIdx].kwargs) stepsData[stepIdx].kwargs = {};
-    // 简单类型转换
-    if(val === "true") val = true;
-    if(val === "false") val = false;
-    stepsData[stepIdx].kwargs[kwName] = val;
-}
-
-// 保存可视化数据
-function saveVisual() {
-    let data = { "steps": stepsData, "parametrize": "[{\"url\": \"https://10.235.2.96:31080/\"}]" };
-    document.getElementById('finalContent').value = JSON.stringify(data, null, 2);
-    document.getElementById('caseForm').submit();
-}
-
-// 处理文件导入
-function importFile(input) {
-    if (input.files && input.files[0]) {
-        let reader = new FileReader();
-        reader.onload = function(e) {
-            document.getElementById('scriptContent').value = e.target.result;
-        };
-        reader.readAsText(input.files[0]);
+function updateCaseInfo(caseIdx, field, val) {
+    allCasesData[caseIdx][field] = val;
+    if (field === 'name') {
+        document.getElementById(`title-${caseIdx}`).innerText = val;
     }
 }
 
-// 保存代码数据
-function saveScript() {
-    document.getElementById('finalContent').value = document.getElementById('scriptContent').value;
-    document.getElementById('caseForm').submit();
+function deleteCase(caseIdx) {
+    if(confirm('确认删除此条用例？')) {
+        allCasesData.splice(caseIdx, 1);
+        renderAll();
+    }
 }
 
-// 页面加载时执行初始化
+function addStep(caseIdx) {
+    allCasesData[caseIdx].steps.push({ target: "browser", action: "", args: [], kwargs: {}, _methodId: null });
+    renderSteps(caseIdx);
+}
+
+function removeStep(caseIdx, stepIdx) {
+    allCasesData[caseIdx].steps.splice(stepIdx, 1);
+    renderSteps(caseIdx);
+}
+
+function changeAction(caseIdx, stepIdx, methodId) {
+    if(!methodId) return;
+    const m = actionMethods.find(x => x.id == methodId);
+    const step = allCasesData[caseIdx].steps[stepIdx];
+    step._methodId = m.id;
+    step.target = m.target;
+    step.action = m.name;
+    step.args = [];
+    step.kwargs = {};
+    renderSteps(caseIdx);
+}
+
+function updateArg(caseIdx, stepIdx, argIdx, val) {
+    if(!allCasesData[caseIdx].steps[stepIdx].args) allCasesData[caseIdx].steps[stepIdx].args = [];
+    allCasesData[caseIdx].steps[stepIdx].args[argIdx] = val;
+}
+
+function updateKwarg(caseIdx, stepIdx, kwName, val) {
+    if(!allCasesData[caseIdx].steps[stepIdx].kwargs) allCasesData[caseIdx].steps[stepIdx].kwargs = {};
+    if(val === 'true') val = true;
+    if(val === 'false') val = false;
+    allCasesData[caseIdx].steps[stepIdx].kwargs[kwName] = val;
+}
+
+// 5. 保存所有用例
+async function saveAllCases() {
+    // 移除前端的临时 _methodId 字段，净化数据
+    const payload = allCasesData.map(c => {
+        let steps = c.steps.map(s => {
+            let clean = {...s};
+            delete clean._methodId;
+            return clean;
+        });
+        return {
+            id: c.id,
+            name: c.name,
+            case_type: c.case_type,
+            content: JSON.stringify({ parametrize: c.parametrize, steps: steps })
+        };
+    });
+
+    const res = await fetch('/api/batch_save_cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cases: payload, user: "admin" })
+    });
+
+    if(res.ok) {
+        alert("保存成功！");
+        window.location.href = "/"; // 跳回首页
+    } else {
+        alert("保存失败！");
+    }
+}
+
 window.onload = init;
 </script>
 {% endblock %}

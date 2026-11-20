@@ -14,6 +14,9 @@ class TestCase(db.Model):
     version = db.Column(db.Integer, nullable=False, default=1)
     updated_by = db.Column(db.String(100), default="anonymous")
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    case_type = db.Column(db.String(20), default="visual")
+    __mapper_args__ = {"version_id_col": version}
+
 
     # 关键：声明 version 列为乐观锁列。
     # SQLAlchemy 会在 UPDATE 时自动加 WHERE version = <加载时的值>，
@@ -28,6 +31,7 @@ class TestCase(db.Model):
             "project": self.project,
             "content": json.loads(self.content or "{}"),
             "version": self.version,
+            "case_type": self.case_type
         }
 
 
@@ -56,3 +60,11 @@ class TestResult(db.Model):
     status = db.Column(db.String(20))
     duration = db.Column(db.Float, default=0.0)
     history_id = db.Column(db.String(100))
+
+class ActionMethod(db.Model):
+    __tablename__ = "action_method"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True) # 方法名，如 click_by_text
+    target = db.Column(db.String(100), default="browser")         # 对象，如 browser, browser.page
+    args_json = db.Column(db.Text, default="[]")                  # 位置参数，如 ["url"]
+    kwargs_json = db.Column(db.Text, default="[]")                # 关键字参数，如 ["text", "mark"]

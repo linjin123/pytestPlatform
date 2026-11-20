@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
+<div style="margin-bottom: 20px;">
+  <a href="/cases/batch_edit" class="btn" style="background:#007bff; color:white; text-decoration:none;">进入可视化用例编排</a>
+  <a href="/methods" class="btn">管理动作字典</a>
+</div>
 <h2>用例列表</h2>
 <form method="post" action="/runs">
   <table>
@@ -11,22 +15,25 @@
       <td>{{ c.name }}</td>
       <td>{{ c.version }}</td>
       <td>{{ c.updated_at }} by {{ c.updated_by }}</td>
-      <td><a href="/cases/{{ c.id }}/edit">编辑</a></td>
+      <td><a href="/cases/batch_edit?id={{ c.id }}">编辑</a></td>
     </tr>
     {% endfor %}
   </table>
   <p>
     操作人：<input name="user" placeholder="你的名字">
     <button class="btn" type="submit">执行选中用例</button>
-    <a class="btn" href="/cases/new">新建用例</a>
+<!--    <a class="btn" href="/cases/new">新建用例</a>-->
   </p>
 </form>
 
-<h3>导入用例（JSON）</h3>
-<form method="post" action="/cases/import" enctype="multipart/form-data">
-  <input type="file" name="file" accept=".json">
-  <button class="btn">导入</button>
-</form>
+<div style="background: #eef2f5; padding: 15px; border-radius: 5px;">
+  <h3>导入 test_*.py 脚本</h3>
+  <form method="post" action="/cases/import_script" enctype="multipart/form-data">
+    <input type="file" name="files" accept=".py" multiple required>
+    <button class="btn" type="submit">批量上传并入库</button>
+    <span style="font-size: 12px; color: #666; margin-left: 10px;">（支持多选，导入后即可在上方勾选执行）</span>
+  </form>
+</div>
 
 <h3>最近执行</h3>
 <table>
